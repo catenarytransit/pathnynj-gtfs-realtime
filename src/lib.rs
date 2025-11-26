@@ -18,11 +18,12 @@ struct PathResponse {
     content: String,
 }
 
+const ALERTS_URL: &str = "https://path-mppprod-app.azurewebsites.net/api/v1/AppContent/fetch?contentKey=PathAlert";
+
 pub async fn fetch_path_alerts() -> Result<FeedMessage, Box<dyn Error>> {
     let client = Client::new();
-    let url = "https://path-mppprod-app.azurewebsites.net/api/v1/AppContent/fetch?contentKey=PathAlert";
     
-    let resp = client.get(url).send().await?.json::<PathResponse>().await?;
+    let resp = client.get(ALERTS_URL).send().await?.json::<PathResponse>().await?;
     parse_path_alerts(&resp.content)
 }
 

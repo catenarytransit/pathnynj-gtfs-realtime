@@ -14,7 +14,7 @@ async fn main() {
                     }
                 }
             }
-        },
+        }
         Err(e) => eprintln!("Error fetching alerts: {}", e),
     }
 }

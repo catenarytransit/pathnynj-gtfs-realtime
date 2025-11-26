@@ -1,9 +1,8 @@
 use chrono::NaiveDateTime;
 use gtfs_realtime::{
-    feed_header::Incrementality, FeedEntity, FeedHeader,
-    FeedMessage, Alert, EntitySelector,
+    Alert, EntitySelector, FeedEntity, FeedHeader, FeedMessage, TimeRange,
     alert::{Cause, Effect},
-    TimeRange,
+    feed_header::Incrementality,
     translated_string::Translation,
 };
 use reqwest::Client;
@@ -18,22 +17,33 @@ struct PathResponse {
     content: String,
 }
 
-const ALERTS_URL: &str = "https://path-mppprod-app.azurewebsites.net/api/v1/AppContent/fetch?contentKey=PathAlert";
+const ALERTS_URL: &str =
+    "https://path-mppprod-app.azurewebsites.net/api/v1/AppContent/fetch?contentKey=PathAlert";
 
 pub async fn fetch_path_alerts() -> Result<FeedMessage, Box<dyn Error>> {
     let client = Client::new();
-    
-    let resp = client.get(ALERTS_URL).send().await?.json::<PathResponse>().await?;
+
+    let resp = client
+        .get(ALERTS_URL)
+        .send()
+        .await?
+        .json::<PathResponse>()
+        .await?;
     parse_path_alerts(&resp.content)
 }
 
 use regex::Regex;
 use std::sync::LazyLock;
 
-static STATION_SELECTOR: LazyLock<Selector> = LazyLock::new(|| Selector::parse("div.station").unwrap());
-static DATE_SELECTOR: LazyLock<Selector> = LazyLock::new(|| Selector::parse("div.stationName table tr td strong span").unwrap());
-static TEXT_SELECTOR: LazyLock<Selector> = LazyLock::new(|| Selector::parse("span.alertText").unwrap());
-static APOLOGIZE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"We (apologize|regret) (for )?(the|this|any)?( )?(inconvenience)( )?(this )?(may )?(have|has)?( )?(caused)?(.*\.?)").unwrap());
+static STATION_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.station").unwrap());
+static DATE_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.stationName table tr td strong span").unwrap());
+static TEXT_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("span.alertText").unwrap());
+static APOLOGIZE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"We (apologize|regret) (for )?(the|this|any)?( )?(inconvenience)( )?(this )?(may )?(have|has)?( )?(caused)?(.*\.?)").unwrap()
+});
 
 pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
     let clean_content = content.replace("&quot", "\"");
@@ -45,7 +55,7 @@ pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
     for (index, element) in document.select(&STATION_SELECTOR).enumerate() {
         let mut date_str = String::new();
         let mut time_str = String::new();
-        
+
         // Extract date and time
         let mut date_time_iter = element.select(&DATE_SELECTOR);
         if let Some(d) = date_time_iter.next() {
@@ -58,22 +68,30 @@ pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
         let full_date_str = format!("{} {}", date_str, time_str);
         // Format: 11/25/2025 11:21 PM
         let parsed_time = NaiveDateTime::parse_from_str(&full_date_str, "%m/%d/%Y %I:%M %p");
-        
+
         let timestamp = match parsed_time {
             Ok(dt) => {
                 // Assuming Eastern Time (New York) - simplified
-                 dt.and_utc().timestamp() as u64
-            },
+                dt.and_utc().timestamp() as u64
+            }
             Err(_) => current_timestamp, // Fallback
         };
 
         let mut alert_text = String::new();
         if let Some(text_el) = element.select(&TEXT_SELECTOR).next() {
-            alert_text = text_el.text().collect::<Vec<_>>().join("").trim().to_string();
+            alert_text = text_el
+                .text()
+                .collect::<Vec<_>>()
+                .join("")
+                .trim()
+                .to_string();
         }
 
         // Clean up alert text
-        let clean_alert_text = APOLOGIZE_REGEX.replace_all(&alert_text, "").trim().to_string();
+        let clean_alert_text = APOLOGIZE_REGEX
+            .replace_all(&alert_text, "")
+            .trim()
+            .to_string();
 
         if clean_alert_text.is_empty() {
             continue;
@@ -132,12 +150,12 @@ mod tests {
     fn test_parse_example() {
         let content = fs::read_to_string("example.json").expect("Failed to read example.json");
         let response: PathResponse = serde_json::from_str(&content).expect("Failed to parse JSON");
-        
+
         let feed = parse_path_alerts(&response.content).expect("Failed to parse alerts");
-        
+
         assert!(!feed.entity.is_empty(), "Should have found alerts");
         println!("Found {} alerts", feed.entity.len());
-        
+
         for entity in feed.entity {
             if let Some(alert) = entity.alert {
                 if let Some(desc) = alert.description_text {

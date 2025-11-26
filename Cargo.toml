@@ -2,6 +2,10 @@
 name = "pathnynj-gtfs-realtime"
 version = "0.1.0"
 edition = "2024"
+description = "Fetches PATH alerts and converts them to GTFS Realtime format"
+license = "AGPL-3.0"
+repository = "https://github.com/catenarytransit/pathnynj-gtfs-realtime"
+authors = [Kyler Chin <kyler@catenarymaps.org>]
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }

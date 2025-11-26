@@ -5,7 +5,7 @@ edition = "2024"
 description = "Fetches PATH alerts and converts them to GTFS Realtime format"
 license = "AGPL-3.0"
 repository = "https://github.com/catenarytransit/pathnynj-gtfs-realtime"
-authors = [Kyler Chin <kyler@catenarymaps.org>]
+authors = ["Kyler Chin <kyler@catenarymaps.org>"]
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
@@ -13,6 +13,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 scraper = "0.18"
 gtfs-realtime = "0.2.0"
+gtfs-structures = "0.43"
 chrono = "0.4"
 tokio = { version = "1", features = ["full"] }
 regex = "1.10"

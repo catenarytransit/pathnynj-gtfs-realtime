@@ -5,6 +5,7 @@ use gtfs_realtime::{
     feed_header::Incrementality,
     translated_string::Translation,
 };
+use gtfs_structures::Gtfs;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
@@ -20,7 +21,7 @@ struct PathResponse {
 const ALERTS_URL: &str =
     "https://path-mppprod-app.azurewebsites.net/api/v1/AppContent/fetch?contentKey=PathAlert";
 
-pub async fn fetch_path_alerts() -> Result<FeedMessage, Box<dyn Error>> {
+pub async fn fetch_path_alerts(gtfs: &Gtfs) -> Result<FeedMessage, Box<dyn Error>> {
     let client = Client::new();
 
     let resp = client
@@ -29,7 +30,7 @@ pub async fn fetch_path_alerts() -> Result<FeedMessage, Box<dyn Error>> {
         .await?
         .json::<PathResponse>()
         .await?;
-    parse_path_alerts(&resp.content)
+    parse_path_alerts(&resp.content, gtfs)
 }
 
 use regex::Regex;
@@ -45,7 +46,7 @@ static APOLOGIZE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"We (apologize|regret) (for )?(the|this|any)?( )?(inconvenience)( )?(this )?(may )?(have|has)?( )?(caused)?(.*\.?)").unwrap()
 });
 
-pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
+pub fn parse_path_alerts(content: &str, gtfs: &Gtfs) -> Result<FeedMessage, Box<dyn Error>> {
     let clean_content = content.replace("&quot", "\"");
     let document = Html::parse_document(&clean_content);
 
@@ -107,10 +108,30 @@ pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
                     start: Some(timestamp),
                     end: None,
                 }],
-                informed_entity: vec![EntitySelector {
-                    agency_id: Some("PATH".to_string()),
-                    ..Default::default()
-                }],
+                informed_entity: {
+                    let route_ids = find_route_ids(&clean_alert_text, gtfs);
+                    let agency_id = gtfs
+                        .agencies
+                        .first()
+                        .and_then(|a| a.id.clone())
+                        .or_else(|| Some("PATH".to_string()));
+
+                    if route_ids.is_empty() {
+                        vec![EntitySelector {
+                            agency_id: agency_id.clone(),
+                            ..Default::default()
+                        }]
+                    } else {
+                        route_ids
+                            .into_iter()
+                            .map(|route_id| EntitySelector {
+                                agency_id: agency_id.clone(),
+                                route_id: Some(route_id),
+                                ..Default::default()
+                            })
+                            .collect()
+                    }
+                },
                 cause: Some(Cause::UnknownCause as i32),
                 effect: Some(Effect::UnknownEffect as i32),
                 url: None,
@@ -141,6 +162,29 @@ pub fn parse_path_alerts(content: &str) -> Result<FeedMessage, Box<dyn Error>> {
     })
 }
 
+fn find_route_ids(text: &str, gtfs: &Gtfs) -> Vec<String> {
+    let route_map = [
+        ("NWK-WTC", "Newark - World Trade Center"),
+        ("HOB-WTC", "Hoboken - World Trade Center"),
+        ("JSQ-33", "Journal Square - 33rd Street"),
+        ("HOB-33", "Hoboken - 33rd Street"),
+    ];
+
+    let mut found_routes = Vec::new();
+
+    for (abbr, long_name) in route_map.iter() {
+        if text.contains(abbr) {
+            // Find route in GTFS with matching long name
+            for route in gtfs.routes.values() {
+                if route.long_name.as_deref() == Some(long_name) {
+                    found_routes.push(route.id.clone());
+                }
+            }
+        }
+    }
+    found_routes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,7 +195,21 @@ mod tests {
         let content = fs::read_to_string("example.json").expect("Failed to read example.json");
         let response: PathResponse = serde_json::from_str(&content).expect("Failed to parse JSON");
 
-        let feed = parse_path_alerts(&response.content).expect("Failed to parse alerts");
+        let gtfs = Gtfs {
+            routes: std::collections::HashMap::new(),
+            agencies: vec![],
+            stops: std::collections::HashMap::new(),
+            trips: std::collections::HashMap::new(),
+            calendar: std::collections::HashMap::new(),
+            calendar_dates: std::collections::HashMap::new(),
+            fare_attributes: std::collections::HashMap::new(),
+            fare_rules: std::collections::HashMap::new(),
+            feed_info: vec![],
+            shapes: std::collections::HashMap::new(),
+            read_duration: std::time::Duration::new(0, 0),
+        };
+
+        let feed = parse_path_alerts(&response.content, &gtfs).expect("Failed to parse alerts");
 
         assert!(!feed.entity.is_empty(), "Should have found alerts");
         println!("Found {} alerts", feed.entity.len());
